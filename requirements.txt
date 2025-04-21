@@ -1,1 +1,7 @@
 streamlit
+elasticsearch
+openai
+altair
+numpy
+pandas
+python-dotenv
