@@ -1,30 +1,14 @@
 import datetime
-import random
 import os
 from dotenv import load_dotenv
-
-import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-
-# Load environment variables
-load_dotenv()
-
-# Elasticsearch and OpenAI imports
 from elasticsearch import Elasticsearch
 from openai import OpenAI
 
-# Show app title and description.
-st.set_page_config(page_title="Support tickets", page_icon="🎫")
-st.title("🎫 Support tickets")
-st.write(
-    """
-    This app shows how you can build an internal tool with Streamlit.
-    We're implementing a support ticket workflow and an AI assistant that can
-    answer questions based on the knowledge base.
-    """
-)
+# Load environment variables
+load_dotenv()
 
 # Elasticsearch and OpenAI client configuration
 @st.cache_resource
@@ -145,13 +129,9 @@ def generate_openai_completion(user_prompt, question):
     )
     return response.choices[0].message.content
 
-# Create a random Pandas dataframe with existing tickets.
+# Only keep the DataFrame initialization for demo tickets
 if "df" not in st.session_state:
-
-    # Set seed for reproducibility.
     np.random.seed(42)
-
-    # Make up some fake issue descriptions.
     issue_descriptions = [
         "Network connectivity issues in the office",
         "Software application crashing on startup",
@@ -174,26 +154,21 @@ if "df" not in st.session_state:
         "Customer data not loading in CRM",
         "Collaboration tool not sending notifications",
     ]
-
-    # Generate the dataframe with 100 rows/tickets.
     data = {
         "ID": [f"TICKET-{i}" for i in range(1100, 1000, -1)],
         "Issue": np.random.choice(issue_descriptions, size=100),
-        "Status": np.random.choice(["Open", "In Progress", "Closed"], size=100),
-        "Priority": np.random.choice(["High", "Medium", "Low"], size=100),
+        "Order ID": [f"ORDER-{i}" for i in range(1100, 1000, -1)],
+        "Product": ["Auto-generated" for _ in range(100)],
         "Date Submitted": [
-            datetime.date(2023, 6, 1) + datetime.timedelta(days=random.randint(0, 182))
+            datetime.date(2023, 6, 1) + datetime.timedelta(days=np.random.randint(0, 182))
             for _ in range(100)
         ],
     }
     df = pd.DataFrame(data)
-
-    # Save the dataframe in session state (a dictionary-like object that persists across
-    # page runs). This ensures our data is persisted when the app updates.
     st.session_state.df = df
 
 st.header("E‑commerce Case Deflection Demo")
-st.write("Describe your issue below. The assistant will try to answer using the knowledge base. If no answer is found, a support ticket will be created automatically.")
+st.write("Describe your issue below. The assistant will try to answer using the knowledge base. If no answer is found, you will see your request in the related tickets table.")
 
 with st.form("case_deflection_form"):
     issue = st.text_area("Describe the issue")
@@ -206,99 +181,48 @@ if submitted and issue and es_client and openai_client:
             context_prompt = create_openai_prompt(elasticsearch_results)
             with st.spinner("Generating response..."):
                 openai_completion = generate_openai_completion(context_prompt, issue)
-                st.markdown("### Assistant Response")
-                st.markdown(openai_completion)
+                import re
+                def format_reference(text):
+                    ref_match = re.search(r'Reference:\s*\[(.*?)\]\((.*?)\)', text)
+                    if ref_match:
+                        title, url = ref_match.groups()
+                        link_html = f'<a href="{url}" target="_blank" style="color:#4ba3fa;">{title}</a>'
+                        text = re.sub(r'Reference:\s*\[.*?\]\(.*?\)', f'Reference: {link_html}', text)
+                    return text
+                formatted_response = format_reference(openai_completion)
+                st.markdown(
+                    '<div style="background-color:#262730;padding:1.5rem 1.2rem;border-radius:12px;border:1px solid #444;margin-bottom:1.5rem;">'
+                    '<h4 style="margin-top:0;margin-bottom:1rem;color:#fff;">Assistant Response</h4>'
+                    f'<div style="color:#fff;white-space:pre-line;font-size:1.1rem;">{formatted_response}</div>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
         else:
-            # No results: create automatic support ticket
+            st.info("No answer found. Your request has been added to the related tickets table.")
+            # Add the user's request to the related tickets table
             recent_ticket_number = int(max(st.session_state.df.ID).split("-")[1]) if len(st.session_state.df) > 0 else 1001
             next_ticket_number = recent_ticket_number + 1
             today = datetime.datetime.now().strftime("%m-%d-%Y")
-            auto_product = "Auto-generated"  # Demo: product is auto-generated
             df_auto = pd.DataFrame([{
                 "ID": f"TICKET-{next_ticket_number}",
                 "Order ID": f"ORDER-{next_ticket_number}",
-                "Product": auto_product,
+                "Product": "Auto-generated",
                 "Issue": issue,
-                "Status": "Open",
-                "Priority": "Medium",
                 "Date Submitted": today
             }])
-            st.info("No answer found. A support ticket has been created for your request.")
-            st.dataframe(df_auto, use_container_width=True, hide_index=True)
             st.session_state.df = pd.concat([df_auto, st.session_state.df], axis=0)
 elif submitted and not (es_client and openai_client):
     st.error("AI assistant is not available. Please check your environment variables for ES_API_KEY and OPENAI_API_KEY.")
 
-# Show section to view and edit existing tickets in a table.
-st.header("Existing tickets")
-st.write(f"Number of tickets: `{len(st.session_state.df)}`")
-
+st.header("Related tickets")
+st.write(f"Number of related tickets: `{len(st.session_state.df)}`")
 st.info(
-    "You can edit the tickets by double clicking on a cell. Note how the plots below "
-    "update automatically! You can also sort the table by clicking on the column headers.",
-    icon="✍️",
+    "Below you can see your recent or related requests. For privacy, only basic information is shown.",
+    icon="🗂️",
 )
-
-# Show the tickets dataframe with `st.data_editor`. This lets the user edit the table
-# cells. The edited data is returned as a new dataframe.
-edited_df = st.data_editor(
-    st.session_state.df,
+df_user = st.session_state.df[[col for col in st.session_state.df.columns if col not in ["Status", "Priority"]]]
+st.dataframe(
+    df_user,
     use_container_width=True,
     hide_index=True,
-    column_config={
-        "Status": st.column_config.SelectboxColumn(
-            "Status",
-            help="Ticket status",
-            options=["Open", "In Progress", "Closed"],
-            required=True,
-        ),
-        "Priority": st.column_config.SelectboxColumn(
-            "Priority",
-            help="Priority",
-            options=["High", "Medium", "Low"],
-            required=True,
-        ),
-    },
-    # Disable editing the ID and Date Submitted columns.
-    disabled=["ID", "Date Submitted"],
 )
-
-# Show some metrics and charts about the ticket.
-st.header("Statistics")
-
-# Show metrics side by side using `st.columns` and `st.metric`.
-col1, col2, col3 = st.columns(3)
-num_open_tickets = len(st.session_state.df[st.session_state.df.Status == "Open"])
-col1.metric(label="Number of open tickets", value=num_open_tickets, delta=10)
-col2.metric(label="First response time (hours)", value=5.2, delta=-1.5)
-col3.metric(label="Average resolution time (hours)", value=16, delta=2)
-
-# Show two Altair charts using `st.altair_chart`.
-st.write("")
-st.write("##### Ticket status per month")
-status_plot = (
-    alt.Chart(edited_df)
-    .mark_bar()
-    .encode(
-        x="month(Date Submitted):O",
-        y="count():Q",
-        xOffset="Status:N",
-        color="Status:N",
-    )
-    .configure_legend(
-        orient="bottom", titleFontSize=14, labelFontSize=14, titlePadding=5
-    )
-)
-st.altair_chart(status_plot, use_container_width=True, theme="streamlit")
-
-st.write("##### Current ticket priorities")
-priority_plot = (
-    alt.Chart(edited_df)
-    .mark_arc()
-    .encode(theta="count():Q", color="Priority:N")
-    .properties(height=300)
-    .configure_legend(
-        orient="bottom", titleFontSize=14, labelFontSize=14, titlePadding=5
-    )
-)
-st.altair_chart(priority_plot, use_container_width=True, theme="streamlit")
