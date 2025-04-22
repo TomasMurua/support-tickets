@@ -176,9 +176,9 @@ if submitted and issue and es_client and openai_client:
                     return text
                 formatted_response = format_reference(openai_completion)
                 st.markdown(
-                    '<div style="background-color:#262730;padding:1.5rem 1.2rem;border-radius:12px;border:1px solid #444;margin-bottom:1.5rem;">'
-                    '<h4 style="margin-top:0;margin-bottom:1rem;color:#fff;">Assistant Response</h4>'
-                    f'<div style="color:#fff;white-space:pre-line;font-size:1.1rem;">{formatted_response}</div>'
+                    '<div style="background-color:#262730;padding:1rem;border-radius:8px;border:1px solid #444;">'
+                    '<h4 style="margin-top:0;margin-bottom:0.5rem;color:#fff;">Agent Response</h4>'
+                    f'<div style="color:#fff;white-space:pre-line;">{formatted_response}</div>'
                     '</div>',
                     unsafe_allow_html=True
                 )
