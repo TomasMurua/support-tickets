@@ -10,6 +10,13 @@ from openai import OpenAI
 # Load environment variables
 load_dotenv()
 
+# Suggestion questions
+SUGGESTION_QUESTIONS = [
+    "How long does shipping take?",
+    "How do I update my shipping address?",
+    "How do I access or update my account information?"
+]
+
 # Elasticsearch and OpenAI client configuration
 @st.cache_resource
 def get_elasticsearch_client():
@@ -18,7 +25,7 @@ def get_elasticsearch_client():
         return None
     
     return Elasticsearch(
-        "https://general-search-d6fc37.es.us-east-1.aws.elastic.cloud:443",
+        os.environ["ES_ENDPOINT"],
         api_key=os.environ["ES_API_KEY"]
     )
 
@@ -129,50 +136,28 @@ def generate_openai_completion(user_prompt, question):
     )
     return response.choices[0].message.content
 
-# Only keep the DataFrame initialization for demo tickets
-if "df" not in st.session_state:
-    np.random.seed(42)
-    issue_descriptions = [
-        "Network connectivity issues in the office",
-        "Software application crashing on startup",
-        "Printer not responding to print commands",
-        "Email server downtime",
-        "Data backup failure",
-        "Login authentication problems",
-        "Website performance degradation",
-        "Security vulnerability identified",
-        "Hardware malfunction in the server room",
-        "Employee unable to access shared files",
-        "Database connection failure",
-        "Mobile application not syncing data",
-        "VoIP phone system issues",
-        "VPN connection problems for remote employees",
-        "System updates causing compatibility issues",
-        "File server running out of storage space",
-        "Intrusion detection system alerts",
-        "Inventory management system errors",
-        "Customer data not loading in CRM",
-        "Collaboration tool not sending notifications",
-    ]
-    data = {
-        "ID": [f"TICKET-{i}" for i in range(1100, 1000, -1)],
-        "Issue": np.random.choice(issue_descriptions, size=100),
-        "Order ID": [f"ORDER-{i}" for i in range(1100, 1000, -1)],
-        "Product": ["Auto-generated" for _ in range(100)],
-        "Date Submitted": [
-            datetime.date(2023, 6, 1) + datetime.timedelta(days=np.random.randint(0, 182))
-            for _ in range(100)
-        ],
-    }
-    df = pd.DataFrame(data)
-    st.session_state.df = df
+st.header("E‑commerce Support Assistant")
+st.write("Describe your issue below. The assistant will try to answer using the knowledge base and show related articles.")
 
-st.header("E‑commerce Case Deflection Demo")
-st.write("Describe your issue below. The assistant will try to answer using the knowledge base. If no answer is found, you will see your request in the related tickets table.")
+# Add suggestion pills
+st.write("Common questions:")
+cols = st.columns(3)
+for i, question in enumerate(SUGGESTION_QUESTIONS):
+    with cols[i % 3]:
+        if st.button(
+            question,
+            key=f"suggestion_{i}",
+            use_container_width=True,
+            type="secondary"
+        ):
+            st.session_state.user_question = question
+            st.session_state.auto_submit = True
 
 with st.form("case_deflection_form"):
-    issue = st.text_area("Describe the issue")
-    submitted = st.form_submit_button("Submit")
+    issue = st.text_area("Describe the issue", value=st.session_state.get("user_question", ""))
+    submitted = st.form_submit_button("Submit") or st.session_state.get("auto_submit", False)
+    if st.session_state.get("auto_submit", False):
+        st.session_state.auto_submit = False
 
 if submitted and issue and es_client and openai_client:
     with st.spinner("Searching knowledge base..."):
@@ -197,32 +182,13 @@ if submitted and issue and es_client and openai_client:
                     '</div>',
                     unsafe_allow_html=True
                 )
+            
+            # Display related articles
+            st.header("Related Articles")
+            for hit in elasticsearch_results:
+                with st.expander(f"Article: {hit['_source'].get('title', 'Untitled')}"):
+                    st.write(hit["_source"].get("text", "No content available"))
         else:
-            st.info("No answer found. Your request has been added to the related tickets table.")
-            # Add the user's request to the related tickets table
-            recent_ticket_number = int(max(st.session_state.df.ID).split("-")[1]) if len(st.session_state.df) > 0 else 1001
-            next_ticket_number = recent_ticket_number + 1
-            today = datetime.datetime.now().strftime("%m-%d-%Y")
-            df_auto = pd.DataFrame([{
-                "ID": f"TICKET-{next_ticket_number}",
-                "Order ID": f"ORDER-{next_ticket_number}",
-                "Product": "Auto-generated",
-                "Issue": issue,
-                "Date Submitted": today
-            }])
-            st.session_state.df = pd.concat([df_auto, st.session_state.df], axis=0)
+            st.info("No relevant articles found in the knowledge base.")
 elif submitted and not (es_client and openai_client):
     st.error("AI assistant is not available. Please check your environment variables for ES_API_KEY and OPENAI_API_KEY.")
-
-st.header("Related tickets")
-st.write(f"Number of related tickets: `{len(st.session_state.df)}`")
-st.info(
-    "Below you can see your recent or related requests. For privacy, only basic information is shown.",
-    icon="🗂️",
-)
-df_user = st.session_state.df[[col for col in st.session_state.df.columns if col not in ["Status", "Priority"]]]
-st.dataframe(
-    df_user,
-    use_container_width=True,
-    hide_index=True,
-)
